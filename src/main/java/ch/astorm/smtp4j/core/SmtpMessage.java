@@ -30,6 +30,14 @@ public class SmtpMessage {
     private List<String> sourceRecipients;
     private MimeMessage mimeMessage;
     private String rawMimeContent;
+    private String sendingHost;
+    
+    public void setSendingHost(String host) {
+    	sendingHost = host;
+    }
+    public String getSendingHost() {
+    	return sendingHost;
+    }
 
     /**
      * Simple {@code Session} used to create the {@code SmtpMessage} instances because depending on the underlying

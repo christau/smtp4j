@@ -18,6 +18,8 @@ public class SmtpTransactionHandler {
     private BufferedReader input;
     private PrintWriter output;
     private MessageReceiver messageReceiver;
+    
+    private String sendingHost;
 
     /**
      * Represents a message receiver within the SMTP transaction.
@@ -62,6 +64,7 @@ public class SmtpTransactionHandler {
         if(ehlo!=null) {
             if(ehlo.getType()==Type.EHLO) {
                 String param = ehlo.getParameter();
+                sendingHost = param;
                 reply(SmtpProtocolConstants.CODE_OK, param!=null ? "smtp4j greets "+ehlo.getParameter() : "OK");
             } else {
                 reply(SmtpProtocolConstants.CODE_BAD_COMMAND_SEQUENCE, "Bad sequence of command (wrong command)");
@@ -141,6 +144,7 @@ public class SmtpTransactionHandler {
                 }
 
                 SmtpMessage message = SmtpMessage.create(mailFrom, recipients, smtpMessageContent.toString());
+                message.setSendingHost(sendingHost);
                 messageReceiver.receiveMessage(message);
                 
                 //reset data
