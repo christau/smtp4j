@@ -123,7 +123,7 @@ public class SmtpTransactionHandler {
                 }
 
                 smtpMessageContent = new StringBuilder(256);
-                reply(SmtpProtocolConstants.CODE_INTERMEDIATE_REPLY, null);
+                reply(SmtpProtocolConstants.CODE_INTERMEDIATE_REPLY, "Start mail input; end with <CRLF>.<CRLF>");
 
                 String currentLine = nextLine();
                 while(currentLine!=null) {
@@ -142,6 +142,11 @@ public class SmtpTransactionHandler {
 
                 SmtpMessage message = SmtpMessage.create(mailFrom, recipients, smtpMessageContent.toString());
                 messageReceiver.receiveMessage(message);
+                
+                //reset data
+                mailFrom = null;
+                recipients = null;
+                smtpMessageContent = null;
 
                 reply(SmtpProtocolConstants.CODE_OK, "OK");
                 continue;
