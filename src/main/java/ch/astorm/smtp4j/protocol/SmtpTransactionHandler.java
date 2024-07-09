@@ -4,10 +4,13 @@ package ch.astorm.smtp4j.protocol;
 import ch.astorm.smtp4j.core.SmtpMessage;
 import ch.astorm.smtp4j.protocol.SmtpCommand.Type;
 import java.io.BufferedReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 /**
@@ -18,6 +21,10 @@ public class SmtpTransactionHandler {
     private BufferedReader input;
     private PrintWriter output;
     private MessageReceiver messageReceiver;
+    
+    public static boolean traceNetworkTraffic = false;
+    public static String traceNetworkTrafficFile = "smtp.log";
+    private static final SimpleDateFormat SDF = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss");
     
     private String sendingHost;
 
@@ -65,6 +72,14 @@ public class SmtpTransactionHandler {
             if(ehlo.getType()==Type.EHLO) {
                 String param = ehlo.getParameter();
                 sendingHost = param;
+                if(sendingHost.equals("localhost")) {
+                	try {
+                		sendingHost = socket.getInetAddress().getCanonicalHostName();
+						
+					} catch (Exception e) {
+						sendingHost = socket.getInetAddress().getHostAddress();
+					}
+                }
                 reply(SmtpProtocolConstants.CODE_OK, param!=null ? "smtp4j greets "+ehlo.getParameter() : "OK");
             } else {
                 reply(SmtpProtocolConstants.CODE_BAD_COMMAND_SEQUENCE, "Bad sequence of command (wrong command)");
@@ -126,7 +141,7 @@ public class SmtpTransactionHandler {
                 }
 
                 smtpMessageContent = new StringBuilder(256);
-                reply(SmtpProtocolConstants.CODE_INTERMEDIATE_REPLY, "Start mail input; end with <CRLF>.<CRLF>");
+                reply(SmtpProtocolConstants.CODE_INTERMEDIATE_REPLY, "End data with <CR><LF>.<CR><LF>");
 
                 String currentLine = nextLine();
                 while(currentLine!=null) {
@@ -175,6 +190,9 @@ public class SmtpTransactionHandler {
     private String nextLine() throws SmtpProtocolException {
         try {
             String line = input.readLine();
+            if(traceNetworkTraffic) {
+            	writeDebug(line, true);
+            }
             if(line==null) { throw new SmtpProtocolException("Unexpected end of stream (no more line)"); }
             return line;
         } catch(IOException ioe) {
@@ -182,7 +200,21 @@ public class SmtpTransactionHandler {
         }
     }
     
-    private SmtpCommand nextCommand() throws SmtpProtocolException {
+    private void writeDebug(String line, boolean in) {
+		try {
+			FileWriter fw = new FileWriter(traceNetworkTrafficFile, true);
+			fw.write(SDF.format(new Date())+(in?"< ":"> ") + line);
+			fw.write("\n");
+			fw.flush();
+			fw.close();
+			
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		
+	}
+
+	private SmtpCommand nextCommand() throws SmtpProtocolException {
         SmtpCommand command = SmtpCommand.parse(nextLine());
         while(command!=null) {
             Type commandType = command.getType();
@@ -211,5 +243,8 @@ public class SmtpTransactionHandler {
 
         output.print(builder.toString());
         output.flush();
+        if(traceNetworkTraffic) {
+        	writeDebug(builder.toString(), false);
+        }
     }
 }
