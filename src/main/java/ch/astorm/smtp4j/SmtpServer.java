@@ -8,6 +8,8 @@ import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -76,7 +78,7 @@ public class SmtpServer implements AutoCloseable {
         this.port = port;
         this.messageHandler = messageHandler!=null ? messageHandler : new DefaultSmtpMessageHandler();
         this.listeners = new ArrayList<>(4);
-        threadPool = Executors.newFixedThreadPool(10); // Create a thread pool
+        threadPool = Executors.newFixedThreadPool(50); // Create a thread pool
     }
 
     /**
@@ -293,12 +295,16 @@ public class SmtpServer implements AutoCloseable {
         }
 
         private void handleConnection(Socket socket) {
+        	try {
+				socket.setSoTimeout(30000);
+			} catch (SocketException e) {
+				LOG.log(Level.SEVERE, "Could not set socket timeout", e);
+			}
             try (BufferedReader input = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.ISO_8859_1));
                  PrintWriter output = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.ISO_8859_1))) {
-
-                synchronized (messageHandler) {
                     SmtpTransactionHandler.handle(socket, input, output, m -> notifyMessage(m));
-                }
+            } catch (SocketTimeoutException e) {
+                LOG.log(Level.WARNING, "Client connection timed out: " + socket.getRemoteSocketAddress());
             } catch (SmtpProtocolException spe) {
                 LOG.log(Level.WARNING, "Protocol Exception", spe);
             } catch (IOException ioe) {
