@@ -283,7 +283,7 @@ public class SmtpServer implements AutoCloseable {
                 try {
                     // Accept incoming connections
                     Socket socket = serverSocket.accept();
-
+                    LOG.log(Level.INFO, "Got connection from " + socket.getRemoteSocketAddress());
                     // Submit each connection to the thread pool for processing
                     threadPool.submit(() -> handleConnection(socket));
                 } catch (IOException ioe) {

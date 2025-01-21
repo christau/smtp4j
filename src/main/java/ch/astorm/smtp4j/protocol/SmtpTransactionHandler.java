@@ -2,14 +2,13 @@
 package ch.astorm.smtp4j.protocol;
 
 import java.io.BufferedReader;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.net.Socket;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import ch.astorm.smtp4j.core.SmtpMessage;
 import ch.astorm.smtp4j.protocol.SmtpCommand.Type;
@@ -18,14 +17,13 @@ import ch.astorm.smtp4j.protocol.SmtpCommand.Type;
  * Handles the SMTP protocol.
  */
 public class SmtpTransactionHandler {
+	private static final Logger LOG = Logger.getLogger(SmtpTransactionHandler.class.getName());
     private Socket socket;
     private BufferedReader input;
     private PrintWriter output;
     private MessageReceiver messageReceiver;
     
     public static boolean traceNetworkTraffic = false;
-    public static String traceNetworkTrafficFile = "smtp.log";
-    private static final DateTimeFormatter DTF = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
     
     private String sendingHost;
 
@@ -110,6 +108,7 @@ public class SmtpTransactionHandler {
                     mailFrom = enbraced.substring(1, enbraced.length()-1);
                     reply(SmtpProtocolConstants.CODE_OK, "OK");
                 } else if(commandType==Type.QUIT) {
+                	LOG.log(Level.INFO, "Client sent QUIT");
                     reply(SmtpProtocolConstants.CODE_OK, "OK");
                     return;
                 } else {
@@ -197,22 +196,13 @@ public class SmtpTransactionHandler {
             if(line==null) { throw new SmtpProtocolException("Unexpected end of stream (no more line)"); }
             return line;
         } catch(IOException ioe) {
-            throw new SmtpProtocolException("I/O exception", ioe);
+        	LOG.log(Level.SEVERE, "Exception while handling.", ioe);
+        	throw new SmtpProtocolException("I/O exception", ioe);
         }
     }
     
     private synchronized void writeDebug(String line, boolean in) {
-		try {
-			FileWriter fw = new FileWriter(traceNetworkTrafficFile, true);
-			fw.write(LocalDateTime.now().format(DTF) + (in ? "< " : "> ") + line + "\n");
-			fw.write("\n");
-			fw.flush();
-			fw.close();
-			
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-		
+    	LOG.log(Level.INFO, (in ? "< " : "> ") + line );
 	}
 
 	private SmtpCommand nextCommand() throws SmtpProtocolException {
