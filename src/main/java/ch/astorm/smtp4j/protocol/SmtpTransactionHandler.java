@@ -1,17 +1,18 @@
 
 package ch.astorm.smtp4j.protocol;
 
-import ch.astorm.smtp4j.core.SmtpMessage;
-import ch.astorm.smtp4j.protocol.SmtpCommand.Type;
 import java.io.BufferedReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.net.Socket;
-import java.text.SimpleDateFormat;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
+
+import ch.astorm.smtp4j.core.SmtpMessage;
+import ch.astorm.smtp4j.protocol.SmtpCommand.Type;
 
 /**
  * Handles the SMTP protocol.
@@ -24,7 +25,7 @@ public class SmtpTransactionHandler {
     
     public static boolean traceNetworkTraffic = false;
     public static String traceNetworkTrafficFile = "smtp.log";
-    private static final SimpleDateFormat SDF = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss");
+    private static final DateTimeFormatter DTF = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
     
     private String sendingHost;
 
@@ -200,10 +201,10 @@ public class SmtpTransactionHandler {
         }
     }
     
-    private void writeDebug(String line, boolean in) {
+    private synchronized void writeDebug(String line, boolean in) {
 		try {
 			FileWriter fw = new FileWriter(traceNetworkTrafficFile, true);
-			fw.write(SDF.format(new Date())+(in?"< ":"> ") + line);
+			fw.write(LocalDateTime.now().format(DTF) + (in ? "< " : "> ") + line + "\n");
 			fw.write("\n");
 			fw.flush();
 			fw.close();

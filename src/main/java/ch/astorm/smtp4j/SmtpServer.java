@@ -1,14 +1,6 @@
 
 package ch.astorm.smtp4j;
 
-import ch.astorm.smtp4j.core.SmtpMessage;
-import ch.astorm.smtp4j.core.SmtpMessageHandler;
-import ch.astorm.smtp4j.core.SmtpMessageHandler.SmtpMessageReader;
-import ch.astorm.smtp4j.core.DefaultSmtpMessageHandler;
-import ch.astorm.smtp4j.core.SmtpServerListener;
-import ch.astorm.smtp4j.protocol.SmtpProtocolException;
-import ch.astorm.smtp4j.protocol.SmtpTransactionHandler;
-import jakarta.mail.Session;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -20,8 +12,19 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import ch.astorm.smtp4j.core.DefaultSmtpMessageHandler;
+import ch.astorm.smtp4j.core.SmtpMessage;
+import ch.astorm.smtp4j.core.SmtpMessageHandler;
+import ch.astorm.smtp4j.core.SmtpMessageHandler.SmtpMessageReader;
+import ch.astorm.smtp4j.core.SmtpServerListener;
+import ch.astorm.smtp4j.protocol.SmtpProtocolException;
+import ch.astorm.smtp4j.protocol.SmtpTransactionHandler;
+import jakarta.mail.Session;
 
 /**
  * Simple SMTP server.
@@ -36,6 +39,7 @@ public class SmtpServer implements AutoCloseable {
 
     private volatile ServerSocket serverSocket;
     private Thread localThread;
+    private final ExecutorService threadPool;
 
     /**
      * Default SMTP port.
@@ -72,6 +76,7 @@ public class SmtpServer implements AutoCloseable {
         this.port = port;
         this.messageHandler = messageHandler!=null ? messageHandler : new DefaultSmtpMessageHandler();
         this.listeners = new ArrayList<>(4);
+        threadPool = Executors.newFixedThreadPool(10); // Create a thread pool
     }
 
     /**
@@ -274,16 +279,35 @@ public class SmtpServer implements AutoCloseable {
     private class SmtpPacketListener implements Runnable {
         @Override
         public void run() {
-            while(serverSocket!=null) {
-                try(Socket socket = serverSocket.accept();
-                    BufferedReader input = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.ISO_8859_1));
-                    PrintWriter output = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.ISO_8859_1))) {
-                    synchronized(messageHandler) { SmtpTransactionHandler.handle(socket, input, output, m -> notifyMessage(m)); }
-                } catch(SmtpProtocolException spe) {
-                    LOG.log(Level.WARNING, "Protocol Exception", spe);
-                } catch(IOException ioe) {
-                    /* can be generally safely ignored because occurs when the server is being closed */
+            while (serverSocket != null && !serverSocket.isClosed()) {
+                try {
+                    // Accept incoming connections
+                    Socket socket = serverSocket.accept();
+
+                    // Submit each connection to the thread pool for processing
+                    threadPool.submit(() -> handleConnection(socket));
+                } catch (IOException ioe) {
                     LOG.log(Level.FINER, "I/O Exception", ioe);
+                }
+            }
+        }
+
+        private void handleConnection(Socket socket) {
+            try (BufferedReader input = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.ISO_8859_1));
+                 PrintWriter output = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.ISO_8859_1))) {
+
+                synchronized (messageHandler) {
+                    SmtpTransactionHandler.handle(socket, input, output, m -> notifyMessage(m));
+                }
+            } catch (SmtpProtocolException spe) {
+                LOG.log(Level.WARNING, "Protocol Exception", spe);
+            } catch (IOException ioe) {
+                LOG.log(Level.FINER, "I/O Exception during handling connection", ioe);
+            } finally {
+                try {
+                    socket.close();
+                } catch (IOException e) {
+                    LOG.log(Level.FINER, "Failed to close socket", e);
                 }
             }
         }
