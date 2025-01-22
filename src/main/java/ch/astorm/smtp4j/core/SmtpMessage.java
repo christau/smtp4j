@@ -28,11 +28,18 @@ import java.util.Properties;
  * Represents an SMTP message.
  */
 public class SmtpMessage {
-    private final String sourceFrom;
-    private final List<String> sourceRecipients;
-    private final MimeMessage mimeMessage;
-    private final String rawMimeContent;
-    private final List<SmtpExchange> exchanges;
+    private String sourceFrom;
+    private List<String> sourceRecipients;
+    private MimeMessage mimeMessage;
+    private String rawMimeContent;
+    private String sendingHost;
+    
+    public void setSendingHost(String host) {
+    	sendingHost = host;
+    }
+    public String getSendingHost() {
+    	return sendingHost;
+    }
 
     /**
      * Simple {@code Session} used to create the {@code SmtpMessage} instances because depending on the underlying

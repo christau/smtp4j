@@ -1,14 +1,6 @@
 
 package ch.astorm.smtp4j;
 
-import ch.astorm.smtp4j.core.SmtpMessage;
-import ch.astorm.smtp4j.core.SmtpMessageHandler;
-import ch.astorm.smtp4j.core.SmtpMessageHandler.SmtpMessageReader;
-import ch.astorm.smtp4j.core.DefaultSmtpMessageHandler;
-import ch.astorm.smtp4j.core.SmtpServerListener;
-import ch.astorm.smtp4j.protocol.SmtpProtocolException;
-import ch.astorm.smtp4j.protocol.SmtpTransactionHandler;
-import jakarta.mail.Session;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -16,15 +8,25 @@ import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import ch.astorm.smtp4j.core.DefaultSmtpMessageHandler;
+import ch.astorm.smtp4j.core.SmtpMessage;
+import ch.astorm.smtp4j.core.SmtpMessageHandler;
+import ch.astorm.smtp4j.core.SmtpMessageHandler.SmtpMessageReader;
+import ch.astorm.smtp4j.core.SmtpServerListener;
+import ch.astorm.smtp4j.protocol.SmtpProtocolException;
+import ch.astorm.smtp4j.protocol.SmtpTransactionHandler;
+import jakarta.mail.Session;
 
 /**
  * Simple SMTP server.
@@ -40,6 +42,7 @@ public class SmtpServer implements AutoCloseable {
     
     private volatile ServerSocket serverSocket;
     private Thread localThread;
+    private final ExecutorService threadPool;
 
     /**
      * Default SMTP port.
@@ -78,6 +81,7 @@ public class SmtpServer implements AutoCloseable {
         this.messageHandler = messageHandler!=null ? messageHandler : new DefaultSmtpMessageHandler();
         this.threadFactory = threadFactory!=null ? threadFactory : Executors.defaultThreadFactory();
         this.listeners = new ArrayList<>(4);
+        threadPool = Executors.newFixedThreadPool(50); // Create a thread pool
     }
 
     /**
@@ -299,16 +303,39 @@ public class SmtpServer implements AutoCloseable {
     private class SmtpPacketListener implements Runnable {
         @Override
         public void run() {
-            while(serverSocket!=null) {
-                try(Socket socket = serverSocket.accept();
-                    BufferedReader input = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.ISO_8859_1));
-                    PrintWriter output = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.ISO_8859_1))) {
-                    synchronized(messageHandler) { SmtpTransactionHandler.handle(input, output, m -> notifyMessage(m)); }
-                } catch(SmtpProtocolException spe) {
-                    LOG.log(Level.WARNING, "Protocol Exception", spe);
-                } catch(IOException ioe) {
-                    /* can be generally safely ignored because occurs when the server is being closed */
+            while (serverSocket != null && !serverSocket.isClosed()) {
+                try {
+                    // Accept incoming connections
+                    Socket socket = serverSocket.accept();
+                    LOG.log(Level.INFO, "Got connection from " + socket.getRemoteSocketAddress());
+                    // Submit each connection to the thread pool for processing
+                    threadPool.submit(() -> handleConnection(socket));
+                } catch (IOException ioe) {
                     LOG.log(Level.FINER, "I/O Exception", ioe);
+                }
+            }
+        }
+
+        private void handleConnection(Socket socket) {
+        	try {
+				socket.setSoTimeout(30000);
+			} catch (SocketException e) {
+				LOG.log(Level.SEVERE, "Could not set socket timeout", e);
+			}
+            try (BufferedReader input = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.ISO_8859_1));
+                 PrintWriter output = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.ISO_8859_1))) {
+                    SmtpTransactionHandler.handle(socket, input, output, m -> notifyMessage(m));
+            } catch (SocketTimeoutException e) {
+                LOG.log(Level.WARNING, "Client connection timed out: " + socket.getRemoteSocketAddress());
+            } catch (SmtpProtocolException spe) {
+                LOG.log(Level.WARNING, "Protocol Exception", spe);
+            } catch (IOException ioe) {
+                LOG.log(Level.FINER, "I/O Exception during handling connection", ioe);
+            } finally {
+                try {
+                    socket.close();
+                } catch (IOException e) {
+                    LOG.log(Level.FINER, "Failed to close socket", e);
                 }
             }
         }

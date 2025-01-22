@@ -1,21 +1,30 @@
 
 package ch.astorm.smtp4j.protocol;
 
-import ch.astorm.smtp4j.core.SmtpMessage;
-import ch.astorm.smtp4j.protocol.SmtpCommand.Type;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import ch.astorm.smtp4j.core.SmtpMessage;
+import ch.astorm.smtp4j.protocol.SmtpCommand.Type;
 
 /**
  * Handles the SMTP protocol.
  */
 public class SmtpTransactionHandler {
-    private final BufferedReader input;
-    private final PrintWriter output;
-    private final MessageReceiver messageReceiver;
+	private static final Logger LOG = Logger.getLogger(SmtpTransactionHandler.class.getName());
+    private Socket socket;
+    private BufferedReader input;
+    private PrintWriter output;
+    private MessageReceiver messageReceiver;
+    
+    public static boolean traceNetworkTraffic = false;
+    
+    private String sendingHost;
 
     /**
      * Represents a message receiver within the SMTP transaction.
@@ -58,6 +67,15 @@ public class SmtpTransactionHandler {
         if(ehlo!=null) {
             if(ehlo.getType()==Type.EHLO) {
                 String param = ehlo.getParameter();
+                sendingHost = param;
+                if(sendingHost.equals("localhost")) {
+                	try {
+                		sendingHost = socket.getInetAddress().getCanonicalHostName();
+						
+					} catch (Exception e) {
+						sendingHost = socket.getInetAddress().getHostAddress();
+					}
+                }
                 reply(SmtpProtocolConstants.CODE_OK, param!=null ? "smtp4j greets "+ehlo.getParameter() : "OK");
             } else {
                 reply(SmtpProtocolConstants.CODE_BAD_COMMAND_SEQUENCE, "Bad sequence of command (wrong command)");
@@ -90,6 +108,7 @@ public class SmtpTransactionHandler {
                     mailFrom = enbraced.substring(1, enbraced.length()-1);
                     reply(SmtpProtocolConstants.CODE_OK, "OK");
                 } else if(commandType==Type.QUIT) {
+                	LOG.log(Level.INFO, "Client sent QUIT");
                     reply(SmtpProtocolConstants.CODE_OK, "OK");
                     break;
                 } else {
@@ -122,7 +141,7 @@ public class SmtpTransactionHandler {
                 }
 
                 smtpMessageContent = new StringBuilder(256);
-                reply(SmtpProtocolConstants.CODE_INTERMEDIATE_REPLY, "Start mail input; end with <CRLF>.<CRLF>");
+                reply(SmtpProtocolConstants.CODE_INTERMEDIATE_REPLY, "End data with <CR><LF>.<CR><LF>");
 
                 String currentLine = nextLine();
                 while(currentLine!=null) {
@@ -141,6 +160,15 @@ public class SmtpTransactionHandler {
 
                     currentLine = nextLine();
                 }
+
+                SmtpMessage message = SmtpMessage.create(mailFrom, recipients, smtpMessageContent.toString());
+                message.setSendingHost(sendingHost);
+                messageReceiver.receiveMessage(message);
+                
+                //reset data
+                mailFrom = null;
+                recipients = null;
+                smtpMessageContent = null;
 
                 reply(SmtpProtocolConstants.CODE_OK, "OK");
                 continue;
@@ -164,15 +192,23 @@ public class SmtpTransactionHandler {
     private String nextLine() throws SmtpProtocolException {
         try {
             String line = input.readLine();
+            if(traceNetworkTraffic) {
+            	writeDebug(line, true);
+            }
             if(line==null) { throw new SmtpProtocolException("Unexpected end of stream (no more line)"); }
             readData.add(line);
             return line;
         } catch(IOException ioe) {
-            throw new SmtpProtocolException("I/O exception", ioe);
+        	LOG.log(Level.SEVERE, "Exception while handling.", ioe);
+        	throw new SmtpProtocolException("I/O exception", ioe);
         }
     }
     
-    private SmtpCommand nextCommand() throws SmtpProtocolException {
+    private synchronized void writeDebug(String line, boolean in) {
+    	LOG.log(Level.INFO, (in ? "< " : "> ") + line );
+	}
+
+	private SmtpCommand nextCommand() throws SmtpProtocolException {
         SmtpCommand command = SmtpCommand.parse(nextLine());
         while(command!=null) {
             Type commandType = command.getType();
@@ -205,5 +241,8 @@ public class SmtpTransactionHandler {
         
         output.print(builder.toString());
         output.flush();
+        if(traceNetworkTraffic) {
+        	writeDebug(builder.toString(), false);
+        }
     }
 }
